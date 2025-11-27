@@ -1,0 +1,17 @@
+{
+  "name": "ai-cloud-work",
+  "private": true,
+  "workspaces": [
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix web\" \"npm run dev --prefix server\"",
+    "install:all": "npm install && npm install --prefix web && npm install --prefix server",
+    "build": "npm run build --prefix web && npm run build --prefix server",
+    "check": "npm run check --prefix web && npm run check --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.1"
+  }
+}

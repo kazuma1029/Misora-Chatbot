@@ -1,0 +1,14 @@
+**/node_modules
+dist/
+public/
+.env.local
+.env
+source-code.zip
+
+# Terragrunt
+.terragrunt-cache/
+**/.terragrunt-cache/
+terragrunt/accounts/*/terraform.tfstate
+terragrunt/accounts/*/terraform.tfstate.backup
+terragrunt/accounts/*/.terraform/
+terragrunt/accounts/*/.terraform.lock.hcl
