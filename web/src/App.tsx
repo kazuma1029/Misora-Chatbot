@@ -164,7 +164,7 @@ function App() {
           alignItems: "center",
         }}
       >
-        <h1 style={{ margin: 0, color: "#646cff" }}>AI Chat</h1>
+        <h1 style={{ margin: 0, color: "#646cff" }}>美空市チャットボット</h1>
         <button
           type="button"
           onClick={clearConversation}
