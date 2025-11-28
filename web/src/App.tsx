@@ -1,15 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-// --- インポート ---
+// ★追加: Amplifyの機能をインポート
 import { generateClient } from "aws-amplify/data";
-import { Amplify } from "aws-amplify"; // ★追加
-import outputs from "../../amplify_outputs.json"; // ★追加 (パスは環境に合わせて ../../ 等に)
 import type { Schema } from "../../amplify/data/resource"; 
+
 import "./App.css";
 
-// --- ★ここで初期設定を実行する (generateClientより前) ---
-Amplify.configure(outputs);
-
-// --- クライアントを生成 ---
+// ★追加: クライアントを生成
 const client = generateClient<Schema>();
 
 interface ChatMessage {
@@ -127,7 +123,7 @@ function App() {
       await loadConversation();
 
 
-    const res = await fetch("https://ghtcldag8k.execute-api.ap-northeast-1.amazonaws.com/prod", {
+    const res = await fetch("https://ghtcldag8k.execute-api.ap-northeast-1.amazonaws.com/prod/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: messageToSend }),
