@@ -122,6 +122,30 @@ function App() {
       // 即座に画面更新するためにロード
       await loadConversation();
 
+
+    const res = await fetch("https://ghtcldag8k.execute-api.ap-northeast-1.amazonaws.com/prod", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: messageToSend }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const aiText = data.answer ?? "すみません、返答の取得に失敗しました。";
+
+      // ② 返ってきた AI メッセージを Amplify 側の DB に保存
+      await client.models.Message.create({
+        conversationId: conversation.id,
+        role: "assistant",
+        content: aiText,
+        timestamp: Date.now(),
+      });
+
+      // ③ もう一度会話を読み込み（AIの発言を反映）
+      await loadConversation();
       // ---------------
       // 【重要】ここでAI (Bedrock) を呼び出す処理が入りますが、
       // まだバックエンド(Lambda)を作っていないため、一旦スキップします。
