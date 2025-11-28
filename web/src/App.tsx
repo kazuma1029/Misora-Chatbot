@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 // ★追加: Amplifyの機能をインポート
 import { generateClient } from "aws-amplify/data";
-import type { Schema } from "../../amplify/data/resource"; 
+import type { Schema } from "../../amplify/data/resource";
 
 import "./App.css";
 
 // ★追加: クライアントを生成
 const client = generateClient<Schema>();
+
+// ★追加: API Gateway のベースURLを環境変数から取得
+// .env に VITE_API_BASE_URL=https://xxxx.execute-api.ap-northeast-1.amazonaws.com/prod
+// のように設定しておく
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 interface ChatMessage {
   id: string;
@@ -35,22 +40,21 @@ function App() {
     try {
       // 1. 会話ルーム一覧を取得 (無ければ作る)
       const { data: convList } = await client.models.Conversation.list();
-      
+
       let currentConvId;
       if (convList.length > 0) {
         currentConvId = convList[0].id;
       } else {
         // 新規作成
         const { data: newConv } = await client.models.Conversation.create({});
-        if(newConv) currentConvId = newConv.id;
+        if (newConv) currentConvId = newConv.id;
       }
 
       if (!currentConvId) return;
 
       // 2. その会話に紐づくメッセージを取得
-      // (DynamoDBから取得し、timestamp順に並べる)
       const { data: messages } = await client.models.Message.list({
-        filter: { conversationId: { eq: currentConvId } }
+        filter: { conversationId: { eq: currentConvId } },
       });
 
       // 取得したデータをアプリの型に合わせて変換
@@ -67,7 +71,6 @@ function App() {
         id: currentConvId,
         messages: formattedMessages,
       });
-
     } catch (error) {
       console.error("会話の読み込みエラー:", error);
     }
@@ -89,11 +92,11 @@ function App() {
     try {
       // まずメッセージを全て削除
       const { data: messages } = await client.models.Message.list({
-        filter: { conversationId: { eq: conversation.id } }
+        filter: { conversationId: { eq: conversation.id } },
       });
-      
+
       await Promise.all(
-        messages.map(msg => client.models.Message.delete({ id: msg.id }))
+        messages.map((msg) => client.models.Message.delete({ id: msg.id }))
       );
 
       // 画面もクリア
@@ -118,23 +121,29 @@ function App() {
         content: messageToSend,
         timestamp: Date.now(),
       });
-      
+
       // 即座に画面更新するためにロード
       await loadConversation();
 
+      // ★ここで Bedrock(Lambda) を呼ぶ: API Gateway 経由
+      if (!API_BASE_URL) {
+        throw new Error("VITE_API_BASE_URL が設定されていません");
+      }
 
-    const res = await fetch("https://ghtcldag8k.execute-api.ap-northeast-1.amazonaws.com/prod/chat", {
+      const res = await fetch(`${API_BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: messageToSend }),
       });
 
       if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
+        const text = await res.text().catch(() => "");
+        throw new Error(`API error: ${res.status} ${text}`);
       }
 
       const data = await res.json();
-      const aiText = data.answer ?? "すみません、返答の取得に失敗しました。";
+      const aiText =
+        data.answer ?? data.reply ?? "すみません、返答の取得に失敗しました。";
 
       // ② 返ってきた AI メッセージを Amplify 側の DB に保存
       await client.models.Message.create({
@@ -146,12 +155,11 @@ function App() {
 
       // ③ もう一度会話を読み込み（AIの発言を反映）
       await loadConversation();
-      // ---------------
-      // 【重要】ここでAI (Bedrock) を呼び出す処理が入りますが、
-      // まだバックエンド(Lambda)を作っていないため、一旦スキップします。
-      // 次のステップでここを実装します。
-      // ---------------
 
+      // ---------------
+      // 【重要】ここでAI (Bedrock) を呼び出す処理が入り、
+      // すでに Lambda + API Gateway 経由で接続済みです。
+      // ---------------
     } catch (err) {
       console.error(err);
       alert("送信エラーが発生しました");
@@ -160,15 +168,13 @@ function App() {
     }
   };
 
-  // ... (以下、handleKeyPress や return 部分は変更なし) ...
-  // return文の中身はそのままでOKです
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendChatMessage();
     }
   };
-  
+
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString("ja-JP", {
       hour: "2-digit",
@@ -178,9 +184,7 @@ function App() {
 
   return (
     <div className="chat-container">
-        {/* ... (既存のJSXコードそのまま) ... */}
-        {/* 省略していますが、returnの中身は元のコードと同じで構いません */}
-        <div
+      <div
         style={{
           padding: "20px",
           borderBottom: "1px solid #333",
