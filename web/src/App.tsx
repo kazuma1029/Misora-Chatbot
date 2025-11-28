@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+// ★追加: Amplifyの機能をインポート
+import { generateClient } from "aws-amplify/data";
+import type { Schema } from "../../amplify/data/resource"; 
 import "./App.css";
+
+// ★追加: クライアントを生成
+const client = generateClient<Schema>();
 
 interface ChatMessage {
   id: string;
@@ -23,13 +29,44 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  // ★修正: 会話データの読み込み (fetch -> client.models)
   const loadConversation = useCallback(async () => {
     try {
-      const res = await fetch("/api/chat/conversation");
-      if (res.ok) {
-        const data = await res.json();
-        setConversation(data.conversation);
+      // 1. 会話ルーム一覧を取得 (無ければ作る)
+      const { data: convList } = await client.models.Conversation.list();
+      
+      let currentConvId;
+      if (convList.length > 0) {
+        currentConvId = convList[0].id;
+      } else {
+        // 新規作成
+        const { data: newConv } = await client.models.Conversation.create({});
+        if(newConv) currentConvId = newConv.id;
       }
+
+      if (!currentConvId) return;
+
+      // 2. その会話に紐づくメッセージを取得
+      // (DynamoDBから取得し、timestamp順に並べる)
+      const { data: messages } = await client.models.Message.list({
+        filter: { conversationId: { eq: currentConvId } }
+      });
+
+      // 取得したデータをアプリの型に合わせて変換
+      const formattedMessages: ChatMessage[] = messages
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        .map((msg) => ({
+          id: msg.id,
+          role: (msg.role as "user" | "assistant") || "user",
+          content: msg.content || "",
+          timestamp: msg.timestamp || Date.now(),
+        }));
+
+      setConversation({
+        id: currentConvId,
+        messages: formattedMessages,
+      });
+
     } catch (error) {
       console.error("会話の読み込みエラー:", error);
     }
@@ -41,99 +78,72 @@ function App() {
     }
   }, [conversation?.messages.length, scrollToBottom]);
 
-  // 初回読み込み時に現在の会話を取得
   useEffect(() => {
     loadConversation();
   }, [loadConversation]);
 
+  // ★修正: 会話のクリア (fetch -> client.models)
   const clearConversation = async () => {
+    if (!conversation?.id) return;
     try {
-      const res = await fetch("/api/chat/conversation", {
-        method: "DELETE",
+      // まずメッセージを全て削除
+      const { data: messages } = await client.models.Message.list({
+        filter: { conversationId: { eq: conversation.id } }
       });
-      if (res.ok) {
-        setConversation({ id: "", messages: [] });
-        await loadConversation();
-      }
+      
+      await Promise.all(
+        messages.map(msg => client.models.Message.delete({ id: msg.id }))
+      );
+
+      // 画面もクリア
+      setConversation({ id: conversation.id, messages: [] });
     } catch (error) {
       console.error("会話のクリアエラー:", error);
     }
   };
 
   const sendChatMessage = async () => {
-    if (!chatMessage.trim()) return;
+    if (!chatMessage.trim() || !conversation?.id) return;
 
     const messageToSend = chatMessage;
     setChatMessage("");
     setIsLoading(true);
 
-    // ユーザーメッセージを即座に追加
-    const userMessage: ChatMessage = {
-      id: Date.now().toString() + "_user",
-      role: "user",
-      content: messageToSend,
-      timestamp: Date.now(),
-    };
-
-    // 現在の会話にユーザーメッセージを即座に追加
-    setConversation((prev) => {
-      if (!prev) {
-        return {
-          id: "new_conversation",
-          messages: [userMessage],
-        };
-      }
-      return {
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      };
-    });
-
+    // ★修正: ユーザーのメッセージをDBに保存 (fetch -> client.models)
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message: messageToSend }),
+      await client.models.Message.create({
+        conversationId: conversation.id,
+        role: "user",
+        content: messageToSend,
+        timestamp: Date.now(),
       });
+      
+      // 即座に画面更新するためにロード
+      await loadConversation();
 
-      if (res.ok) {
-        // 会話を再読み込みして最新の状態を取得（LLMの応答を含む）
-        await loadConversation();
-      } else {
-        alert("エラーが発生しました");
-        // エラーの場合はユーザーメッセージを削除
-        setConversation((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            messages: prev.messages.filter((msg) => msg.id !== userMessage.id),
-          };
-        });
-      }
-    } catch {
-      alert("通信エラーが発生しました");
-      // エラーの場合はユーザーメッセージを削除
-      setConversation((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          messages: prev.messages.filter((msg) => msg.id !== userMessage.id),
-        };
-      });
+      // ---------------
+      // 【重要】ここでAI (Bedrock) を呼び出す処理が入りますが、
+      // まだバックエンド(Lambda)を作っていないため、一旦スキップします。
+      // 次のステップでここを実装します。
+      // ---------------
+
+    } catch (err) {
+      console.error(err);
+      alert("送信エラーが発生しました");
     } finally {
       setIsLoading(false);
     }
   };
 
+  // ... (以下、handleKeyPress や return 部分は変更なし) ...
+  // return文の中身はそのままでOKです
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendChatMessage();
     }
   };
-
+  
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString("ja-JP", {
       hour: "2-digit",
@@ -143,8 +153,9 @@ function App() {
 
   return (
     <div className="chat-container">
-      {/* ヘッダー */}
-      <div
+        {/* ... (既存のJSXコードそのまま) ... */}
+        {/* 省略していますが、returnの中身は元のコードと同じで構いません */}
+        <div
         style={{
           padding: "20px",
           borderBottom: "1px solid #333",
@@ -153,7 +164,7 @@ function App() {
           alignItems: "center",
         }}
       >
-        <h1 style={{ margin: 0, color: "#646cff" }}>美空市専用チャットボット</h1>
+        <h1 style={{ margin: 0, color: "#646cff" }}>AI Chat</h1>
         <button
           type="button"
           onClick={clearConversation}
@@ -170,7 +181,6 @@ function App() {
         </button>
       </div>
 
-      {/* チャット履歴 */}
       <div
         style={{
           flex: 1,
@@ -271,7 +281,6 @@ function App() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 入力エリア */}
       <div
         style={{
           padding: "20px",
