@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-// ★追加: Amplifyの機能をインポート
+// --- インポート ---
 import { generateClient } from "aws-amplify/data";
-
 import type { Schema } from "../../amplify/data/resource"; 
-
 import "./App.css";
 
-// ★追加: クライアントを生成
+// --- クライアントを生成 ---
 const client = generateClient<Schema>();
 
 interface ChatMessage {
